@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import date, timedelta
-from pathlib import Path
 
 from okr_core._paths import nikki_root
 from okr_core.models import Activity, DailyEntry, RichnessScore, WeeklySummary

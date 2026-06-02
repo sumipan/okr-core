@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from okr_core.models import Activity, DailyEntry, RichnessScore
+from okr_core.models import Activity, DailyEntry
 from okr_core.scoring import calculate_richness_score, weekly_richness_summary
 
 
