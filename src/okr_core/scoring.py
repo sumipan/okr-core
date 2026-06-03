@@ -76,7 +76,8 @@ def calculate_richness_score(entry: DailyEntry) -> RichnessScore:
 def _parse_section_block(content: str, header: str) -> str:
     lines = content.splitlines()
     in_section = False
-    header_level = len(re.match(r"^(#+)", header).group(1)) if re.match(r"^(#+)", header) else 2
+    _hm = re.match(r"^(#+)", header)
+    header_level = len(_hm.group(1)) if _hm else 2
     parts: list[str] = []
     for line in lines:
         if line.strip() == header:
