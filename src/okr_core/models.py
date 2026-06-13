@@ -60,3 +60,63 @@ class WeeklySummary:
     avg: float
     max: int
     min: int
+
+
+@dataclass
+class HalfYearObjective:
+    id: str
+    title: str
+    period: str
+    key_results: list[str]
+
+
+@dataclass
+class MonthlyTheme:
+    id: str
+    objective_id: str
+    month: str
+    title: str
+
+
+@dataclass
+class WeeklyActivity:
+    id: str
+    theme_id: str
+    week: str
+    title: str
+
+
+@dataclass
+class DailyAction:
+    id: str
+    activity_id: str
+    date: str
+    title: str
+    state: str
+    has_diff: bool
+
+
+@dataclass
+class DailyReflectionMaterial:
+    date: str
+    completed_actions: list[DailyAction]
+    declared_vs_done_diff: list[DailyAction]
+    notable_events: list[str]
+
+
+@dataclass
+class MonthlyReflectionMaterial:
+    year: int
+    month: int
+    theme: MonthlyTheme
+    daily_materials: list[DailyReflectionMaterial]
+    theme_progress_summary: str
+
+
+@dataclass
+class HalfYearReflectionMaterial:
+    year: int
+    half: int
+    objective: HalfYearObjective
+    monthly_materials: list[MonthlyReflectionMaterial]
+    kr_progress: dict[str, float]
