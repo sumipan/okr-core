@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import calendar
+import hashlib
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from okr_core import _paths
-from okr_core.models import Activity, KeyResult
+from okr_core.models import (
+    Activity,
+    DailyAction,
+    DailyReflectionMaterial,
+    HalfYearObjective,
+    HalfYearReflectionMaterial,
+    KeyResult,
+    MonthlyReflectionMaterial,
+    MonthlyTheme,
+)
+
+_TASK_SECTION_HEADERS = ("### タスク", "## 今日やること")
 
 _WEEK_RE = re.compile(r"^(\d{4})-W(\d{2})$")
 _KR_FIELD_RE = re.compile(r"^-\s+(objective_id|title|progress):\s*(.+)\s*$", re.MULTILINE)
@@ -84,6 +97,86 @@ def untagged_activities(start: str, end: str) -> list[Activity]:
         for a in _load_all_activities()
         if a.objective_id is None and start_d <= _parse_date(a.date) <= end_d
     ]
+
+
+def reconcile_day(date: str) -> list[DailyAction]:
+    """日記のタスクセクションから DailyAction リストを生成して返す。"""
+    path = _diary_dir() / f"{date}.md"
+    if not path.is_file():
+        return []
+    return _parse_daily_actions_from_diary(path.read_text(encoding="utf-8"), date)
+
+
+def summarize_day(date: str) -> DailyReflectionMaterial:
+    """reconcile_day の結果を DailyReflectionMaterial に集約して返す。"""
+    actions = reconcile_day(date)
+    return DailyReflectionMaterial(
+        date=date,
+        completed_actions=[a for a in actions if a.state == "done"],
+        declared_vs_done_diff=[a for a in actions if a.has_diff],
+        notable_events=[],
+    )
+
+
+def summarize_month(
+    year: int,
+    month: int,
+    theme: MonthlyTheme | None = None,
+) -> MonthlyReflectionMaterial:
+    """対象月の全日分を summarize_day で集約し MonthlyReflectionMaterial を返す。"""
+    _, total_days = calendar.monthrange(year, month)
+    daily_materials = [
+        summarize_day(f"{year}-{month:02d}-{day:02d}")
+        for day in range(1, total_days + 1)
+    ]
+    active_days = sum(1 for d in daily_materials if d.completed_actions)
+    completed_count = sum(len(d.completed_actions) for d in daily_materials)
+    theme_progress_summary = (
+        f"{active_days}/{total_days}日に活動あり, 完了タスク{completed_count}件"
+    )
+    if theme is None:
+        theme = MonthlyTheme(
+            id="",
+            objective_id="",
+            month=f"{year}-{month:02d}",
+            title="",
+        )
+    return MonthlyReflectionMaterial(
+        year=year,
+        month=month,
+        theme=theme,
+        daily_materials=daily_materials,
+        theme_progress_summary=theme_progress_summary,
+    )
+
+
+def summarize_half_year(
+    year: int,
+    half: int,
+    objective: HalfYearObjective | None = None,
+) -> HalfYearReflectionMaterial:
+    """対象半期の各月を summarize_month で集約し HalfYearReflectionMaterial を返す。"""
+    if half not in (1, 2):
+        raise ValueError(f"invalid half: {half}")
+    start_month = 1 if half == 1 else 7
+    end_month = 6 if half == 1 else 12
+    monthly_materials = [
+        summarize_month(year, month) for month in range(start_month, end_month + 1)
+    ]
+    if objective is None:
+        objective = HalfYearObjective(
+            id="",
+            title="",
+            period=f"{year}-H{half}",
+            key_results=[],
+        )
+    return HalfYearReflectionMaterial(
+        year=year,
+        half=half,
+        objective=objective,
+        monthly_materials=monthly_materials,
+        kr_progress={},
+    )
 
 
 def _validate_week(week: str) -> None:
@@ -198,12 +291,52 @@ def _load_all_activities() -> list[Activity]:
     return activities
 
 
+def _parse_daily_actions_from_diary(text: str, day: str) -> list[DailyAction]:
+    actions: list[DailyAction] = []
+    in_tasks = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped in _TASK_SECTION_HEADERS:
+            in_tasks = True
+            continue
+        if in_tasks and stripped.startswith("###"):
+            break
+        if not in_tasks:
+            continue
+        match = re.match(r"^- \[([ xX\-])\] (.+)$", line)
+        if not match:
+            continue
+        state_char, rest = match.group(1), match.group(2)
+        state = "done" if state_char.lower() == "x" else "declared"
+        title = _ACTIVITY_META_RE.sub("", rest).strip()
+        meta = _ACTIVITY_META_RE.search(rest)
+        if meta:
+            act_id = meta.group(1)
+            action_id = f"{act_id}-{day}"
+            activity_id = act_id
+        else:
+            activity_id = ""
+            digest = hashlib.sha256(title.encode()).hexdigest()[:8]
+            action_id = f"daily-{day}-{digest}"
+        actions.append(
+            DailyAction(
+                id=action_id,
+                activity_id=activity_id,
+                date=day,
+                title=title,
+                state=state,
+                has_diff=state == "declared",
+            )
+        )
+    return actions
+
+
 def _parse_activities_from_diary(text: str, day: str) -> list[Activity]:
     activities: list[Activity] = []
     in_tasks = False
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped in ("### タスク", "## 今日やること"):
+        if stripped in _TASK_SECTION_HEADERS:
             in_tasks = True
             continue
         if in_tasks and stripped.startswith("###"):
@@ -247,7 +380,7 @@ def _find_activity(activity_id: str) -> tuple[Path, int, Activity | None]:
         in_tasks = False
         for idx, line in enumerate(lines):
             stripped = line.strip()
-            if stripped in ("### タスク", "## 今日やること"):
+            if stripped in _TASK_SECTION_HEADERS:
                 in_tasks = True
                 continue
             if in_tasks and stripped.startswith("###"):
